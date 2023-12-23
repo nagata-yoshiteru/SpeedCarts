@@ -32,7 +32,7 @@ import org.spongepowered.asm.mixin.injection.callback.CallbackInfoReturnable;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.List;
-import java.util.regex.Matcher;
+import java.util.function.UnaryOperator;
 import java.util.regex.Pattern;
 
 /**
@@ -45,7 +45,6 @@ public abstract class AbstractMinecartMixin extends Entity {
 	private static final double MIN_SPEED = SpeedCarts.config.getMinimumSpeed();
 	private static final double MAX_SPEED = SpeedCarts.config.getMaximumSpeed();
 	private static final Pattern SIGN_PATTERN = Pattern.compile(SpeedCarts.config.getSignRegex());
-	private static final Pattern SPD_PATTERN = Pattern.compile("literal\\{(\\d{1,3})\\}");
 
 	/**
 	 * Time in game ticks, to wait before attempting to update the cart's speed
@@ -123,10 +122,10 @@ public abstract class AbstractMinecartMixin extends Entity {
 		}
 
 		for (BlockPos position : this.getPositionsToCheck(pos)) {
-			BlockEntity blockEntity = this.getWorld().getBlockEntity(position);
+			BlockEntity blockEntity = getWorld().getBlockEntity(position);
 			if (blockEntity instanceof SignBlockEntity sign) {
-				if (!sign.getPos().equals(this.lastUpdatedFrom) || this.getWorld().getTime() > this.lastSpeedUpdate + SPEED_UPDATE_COOLDOWN) {
-					BlockState state = this.getWorld().getBlockState(position);
+				if (!sign.getPos().equals(this.lastUpdatedFrom) || getWorld().getTime() > this.lastSpeedUpdate + SPEED_UPDATE_COOLDOWN) {
+					BlockState state = getWorld().getBlockState(position);
 					Direction dir = (Direction) state.getEntries().get(Properties.HORIZONTAL_FACING);
 					// Only allow free-standing signs or those facing the cart.
 					if (dir == null || dir.equals(this.getMovementDirection().getOpposite())) {
@@ -143,14 +142,8 @@ public abstract class AbstractMinecartMixin extends Entity {
 	 * @return True if the cart's speed was updated, or false otherwise.
 	 */
 	private boolean updateSpeedForSign(SignBlockEntity sign) {
-		String s = sign.getText(true).getMessage(0, true).toString();
-		Matcher m = SPD_PATTERN.matcher(s);
-		if (m.find()){
-			s = m.group(1);
-		} else {
-			System.out.println("invalid spd");
-			System.out.println(s);
-		}
+		Text text = sign.getText(true).getMessage(0, false);
+		String s = text.getString();
 		if (!SIGN_PATTERN.matcher(s).matches()) {
 			return false;
 		}
@@ -158,7 +151,7 @@ public abstract class AbstractMinecartMixin extends Entity {
 			double speed = Double.parseDouble(s);
 			if (speed >= MIN_SPEED && speed <= MAX_SPEED) {
 				this.maxSpeedBps = speed;
-				this.lastSpeedUpdate = this.getWorld().getTime();
+				this.lastSpeedUpdate = getWorld().getTime();
 				this.lastUpdatedFrom = sign.getPos();
 				if (this.hasPlayerRider()) {
 					PlayerEntity player = (PlayerEntity) this.getFirstPassenger();
@@ -168,9 +161,13 @@ public abstract class AbstractMinecartMixin extends Entity {
 				}
 				return true;
 			} else {
-				Text[] msg = {Text.of("Invalid speed!"), Text.of("Min: " + MIN_SPEED), Text.of("Max: " + MAX_SPEED)};
-				SignText t = new SignText(msg, null, DyeColor.RED, true);
-				sign.setText(t, true);
+				UnaryOperator<SignText> errorSign = errorWord -> errorWord
+					.withMessage(0, Text.of("Invalid speed!"))
+					.withMessage(1, Text.of("Min: " + MIN_SPEED))
+					.withMessage(2, Text.of("Max: " + MAX_SPEED))
+					.withGlowing(true)
+					.withColor(DyeColor.RED);
+				sign.changeText(errorSign, true);
 			}
 		} catch (NumberFormatException e) {
 			// Do nothing if no value could be parsed.
